@@ -1,1 +1,242 @@
 Project_blackberry
+
+Objective: Identify SNP and Indel variants in blackberry genotypes. For this exercise I am gonna use only two samples which where submitted to Whole Genome Sequencing
+
+Directory: /home/easilvac/bioinfo_skills/project_blackberry
+
+mkdir reference reads mapping genotyping
+
+# Getting the blackberry reference genome
+cd reference
+ln -s ~/blackberry_resequencing_data/reference/Hillquist_genome_v1_purged_primary_contigs_HiC.fasta .
+
+## Start an interactive session and index reference genome using bwa
+srun --nodes=1 --ntasks-per-node=4  --cpus-per-task=8 --partition tres06 --time=6:00:00 --pty /bin/bash
+
+module load bwa/0.7.17
+bwa index Hillquist_genome_v1_purged_primary_contigs_HiC.fasta
+
+## Quality Check of reads and trimming
+## In folder "reads" you will find four fastq corresponding to two blackberry genotypes pair-end reads 
+
+cd ../reads
+ls
+A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_1.fq.gz
+A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_2.fq.gz
+A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_1.fq.gz
+A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_2.fq.gz
+
+## We are going to use Fastqc to QC of the reads and Trimmomatic for reads trimming
+
+mkdir fastqc
+module load java/sunjdk_1.8.0
+module load fastqc/0.11.5
+
+fastqc -t 4 *.fq.gz -o fastqc/
+
+## Use multiqc to report the results of fastqc
+cd fastqc
+module load python/anaconda-3.8
+source /share/apps/bin/conda-3.8.sh
+conda create -n multiqc
+conda activate multiqc
+conda install -c bioconda multiqc
+multiqc .
+conda deactivate
+
+## multiqc create a folder called "multiqc_data" and a multiqc_report.html file
+## multiqc outputs are saved in /home/easilvac/bioinfo_skills/project_blackberry/reads/fastqc
+
+## According to fastqc results I decided to trim the first 10 base pair for each read and remove remanent Illumina adapters: 
+cd ../
+module load java/sunjdk_1.8.0
+java -jar /home/easilvac/Java/Trimmomatic-0.39/trimmomatic-0.39.jar PE A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_1.fq.gz A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_2.fq.gz A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_1_paired.fq.gz A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_1_unpaired.fq.gz A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_2_paired.fq.gz A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_2_unpaired.fq.gz ILLUMINACLIP:/home/easilvac/Java/Trimmomatic-0.39/adapters/TruSeq3-PE.fa:2:30:10:2:keepBothReads HEADCROP:10 MINLEN:36 > err_A1_L1.log
+
+java -jar /home/easilvac/Java/Trimmomatic-0.39/trimmomatic-0.39.jar PE A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_1.fq.gz A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_2.fq.gz A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_1_paired.fq.gz A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_1_unpaired.fq.gz A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_2_paired.fq.gz A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_2_unpaired.fq.gz ILLUMINACLIP:/home/easilvac/Java/Trimmomatic-0.39/adapters/TruSeq3-PE.fa:2:30:10:2:keepBothReads HEADCROP:10 MINLEN:36 > err_A2_L1.log
+
+mkdir clean_data
+mv *paired.fq.gz clean_data
+cd clean_data 
+rm *unpaired.fq.gz
+
+## QC of trimmed data
+fastqc -t 4 *paired.fq.gz -o ../fastqc/
+
+##############################################################################################
+## Mapping reads to the reference genome using bwa
+
+#!/bin/bash
+#SBATCH --job-name=bwa_job1
+#SBATCH --output=bwa_job1.slurm
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=32
+#SBATCH --time=6:00:00
+#SBATCH --partition tres06
+
+module purge
+module load bwa/0.7.10
+export OMP_NUM_THREADS=32
+cd $SLURM_SUBMIT_DIR
+
+# input files
+f1=/home/easilvac/bioinfo_skills/project_blackberry/reads/clean_data/A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_1_paired.fq.gz;
+f2=/home/easilvac/bioinfo_skills/project_blackberry/reads/clean_data/A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_2_paired.fq.gz;
+f3=/home/easilvac/bioinfo_skills/project_blackberry/reads/clean_data/A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_1_paired.fq.gz;
+f4=/home/easilvac/bioinfo_skills/project_blackberry/reads/clean_data/A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_2_paired.fq.gz;
+
+REFERENCE=/home/easilvac/bioinfo_skills/project_blackberry/reference/Hillquist_genome_v1_purged_primary_contigs_HiC.fasta;
+
+bwa mem -t 32 ${REFERENCE} ${f1} ${f2} > /home/easilvac/bioinfo_skills/project_blackberry/mapping/A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa.sam
+
+bwa mem -t 32 ${REFERENCE} ${f3} ${f4} > /home/easilvac/bioinfo_skills/project_blackberry/mapping/A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa.sam
+
+#############################################################################################
+## Convert SAM to BAM file
+cd ../mapping
+
+#!/bin/bash
+#SBATCH --job-name=samtools
+#SBATCH --output=samtools.slurm
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=32
+#SBATCH --time=6:00:00
+#SBATCH --partition tres06
+
+module purge
+module load samtools/1.13
+export OMP_NUM_THREADS=32
+
+cd $SLURM_SUBMIT_DIR
+
+samtools view -@ 32 -bo A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa.bam A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa.sam
+
+samtools view -@ 32 -bo A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa.bam A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa.sam
+
+#################################################################
+# Remove SAM files and sort BAM files:
+
+rm *L1_paired_bwa.sam
+srun --nodes=1 --ntasks-per-node=32 --partition tres06 --time=6:00:00 --pty /bin/bash
+module load samtools/1.13
+samtools sort -l 9 -@ 32 -o A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa_srt.bam A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa.bam
+
+samtools sort -l 9 -@ 32 -o A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa_srt.bam A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa.bam
+
+##Index BAM files
+samtools index -@ 8 A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa_srt.bam
+samtools index -@ 8 A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa_srt.bam
+
+## Mark duplicates in the sorted BAM files
+
+#!/bin/bash
+#SBATCH --job-name=picard
+#SBATCH --output=picard_job1.slurm
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=2
+#SBATCH --time=06:00:00
+#SBATCH --partition tres06
+
+module load java/sunjdk_1.8.0
+module load fastqc/0.11.5
+module load picard-tools/2.17.10
+
+export OMP_NUM_THREADS=2
+cd $SLURM_SUBMIT_DIR
+
+java -jar ~/picard/build/libs/picard.jar MarkDuplicates -I A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_L1_paired_bwa_srt.bam -O A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_paired_bwa_srt_dup.bam
+
+java -jar ~/picard/build/libs/picard.jar MarkDuplicates -I A2_he_USPD16091723-D702-AK1680_HWM55CCXY_L1_paired_bwa_srt.bam -O A2_he_USPD16091108-D702-AK1680_HV3K2CCXY_paired_bwa_srt_dup.bam
+
+## add read groups to the BAM files
+
+module load picard-tools/2.17.10
+java -jar ~/picard/build/libs/picard.jar AddOrReplaceReadGroups \
+    -I A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_paired_bwa_srt_dup.bam \
+    -O A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_paired_bwa_srt_dup_RG.bam \
+    -SORT_ORDER coordinate \
+    -RGID A1_ta \
+    -RGLB lib1 \
+    -RGPL illumina \
+	  -RGPU HNGYVCCXY \
+    -RGSM A1_ta \
+    -CREATE_INDEX True &
+    
+java -jar ~/picard/build/libs/picard.jar AddOrReplaceReadGroups \
+    -I A2_he_USPD16091108-D702-AK1680_HV3K2CCXY_paired_bwa_srt_dup.bam \
+    -O A2_he_USPD16091108-D702-AK1680_HV3K2CCXY_paired_bwa_srt_dup_RG.bam \
+    -SORT_ORDER coordinate \
+    -RGID A2_he \
+    -RGLB lib1 \
+    -RGPL illumina \
+	  -RGPU HNGYVCCXY \
+    -RGSM A2_he \
+    -CREATE_INDEX True &
+    
+####################################################################:):):):)
+## After many steps, finally we can start calling variants :)
+## Variant calling using GATK4 pipeline
+## Step1: Run HaplotypeCaller of GATK4 pipeline
+cd ../genotyping
+
+#!/bin/bash
+#SBATCH --job-name=gatk_alexsilva
+#SBATCH --output=gatk_job1.slurm
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=2
+#SBATCH --time=288:00:00
+#SBATCH --partition condo
+
+module load gatk/4.2.6.1
+export OMP_NUM_THREADS=2
+cd $SLURM_SUBMIT_DIR
+
+gatk --java-options "-Xmx20g -Xmx20g -XX:ParallelGCThreads=2" HaplotypeCaller -ploidy 4 -R ../reference/Hillquist_genome_v1_purged_primary_contigs_HiC.fasta -I ../mapping/A1_ta_USPD16091723-D701-AK1680_HWM55CCXY_paired_bwa_srt_dup_RG.bam -O A1_ta_variants_gatk.g.vcf -ERC GVCF
+
+gatk --java-options "-Xmx20g -Xmx20g -XX:ParallelGCThreads=2" HaplotypeCaller -ploidy 4 -R ../reference/Hillquist_genome_v1_purged_primary_contigs_HiC.fasta -I ../mapping/A2_he_USPD16091108-D702-AK1680_HV3K2CCXY_paired_bwa_srt_dup_RG.bam -O A2_he_variants_gatk.g.vcf -ERC GVCF
+
+####################################################
+## Step 2: Create a genomicDatabase
+## sample_map is a file with the list of VCF generated with HaplotypeCaller
+## chromosome.list is a list of genomic regions where we want to call variants
+## Both files are located in /home/easilvac/bioinfo_skills/project_blackberry/genotyping
+
+#!/bin/bash
+#SBATCH --job-name=gatk_alexsilva
+#SBATCH --output=GDB_job1.slurm
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=2
+#SBATCH --time=288:00:00
+#SBATCH --partition condo
+
+module load gatk/4.2.6.1
+export OMP_NUM_THREADS=2
+cd $SLURM_SUBMIT_DIR
+
+gatk --java-options "-Xmx8g -Xmx8g -XX:ParallelGCThreads=2" \
+       GenomicsDBImport \
+       --genomicsdb-workspace-path GDatabase \
+       -L chromosome.list \
+       --sample-name-map sample_map \
+       --tmp-dir /scrfs/storage/easilvac
+
+####################################################
+##Step 3: Make a VCF file using GenotypeGVCFs
+
+#!/bin/bash
+#SBATCH --job-name=gatk_alexsilva
+#SBATCH --output=genotype_job1.slurm
+#SBATCH --nodes=1
+#SBATCH --tasks-per-node=2
+#SBATCH --time=288:00:00
+#SBATCH --partition condo
+
+module load gatk/4.2.6.1
+export OMP_NUM_THREADS=2
+cd $SLURM_SUBMIT_DIR
+
+gatk --java-options "-Xmx4g -Xmx4g -XX:ParallelGCThreads=2" GenotypeGVCFs \
+   -R ../reference/Hillquist_genome_v1_purged_primary_contigs_HiC.fasta \
+   -V gendb://GDatabase \
+   -O blackberry_WGS_gatk.vcf.gz
+   
+## Additional steps can be included to filter SNP and InDels based in different parameter such as Mapping Quality (MQ) and Quality by Depth (QD)
